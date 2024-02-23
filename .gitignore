@@ -1,0 +1,15 @@
+**/__pycache__
+**/bleu_plots
+**/bleu_plots
+**/data
+**/multiling_comparison_plots
+**/multiling_detectors
+**/neuron_lists
+**/results
+**/sorted_indices
+**/transformers_cache
+**/.history-bhattacharya
+**/*.log
+**/*.out
+
+
