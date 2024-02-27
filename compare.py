@@ -31,7 +31,8 @@ class compare_stats():
                 # cols = 1
                 # rows = freeze_per.size // cols
                 # fig, axs = plt.subplots(rows, cols, figsize=(10, 8))
-                fig, axs = plt.subplots(freeze_per.size-1, figsize=(9,8))
+                fig, axs = plt.subplots(freeze_per.size-1, figsize=(12, 12))
+                # fig, axs = plt.subplots(freeze_per.size-1, figsize=(9,8))
                 fig.tight_layout(pad=5.0)  
                 d_ttl = f"{ttl}: {direction}"
                 count = -1
@@ -41,7 +42,7 @@ class compare_stats():
                     if freeze == 0.0:
                         baselines = {}
                         colors={}
-                        cols = ['lightcoral','olivedrab','cyan','purple']
+                        cols = ['lightcoral','olivedrab','cyan','purple','black']
                         models = freeze_data[file_cols['model']].unique()
                         for mid, model in enumerate(models):
                             model_base_score = freeze_data[freeze_data[file_cols['model']]==model][file_cols['score (BLEU)']].tolist()[0]
@@ -55,16 +56,20 @@ class compare_stats():
                             model_data = freeze_data[freeze_data[file_cols['model']] == model]
                             x_axis = [int(i)+1 for i in model_data[file_cols['l_lob']].tolist()]
                             y_axis = model_data[file_cols['score (BLEU)']].tolist()
+                            # y_axis = y_axis*100
+                            y_axis = [100*x for x in y_axis]
                             bl = baselines[model]
                             baseline = [bl]*len(y_axis)
+                            # baseline = baseline*100
+                            baseline = [100*x for x in baseline]
                             ax.plot(x_axis, y_axis, label=model, color=colors[model])
                             ax.plot(x_axis, baseline, color=colors[model], linestyle='--')
                             ax.set_title(f"Freeze percentage: {freeze*100} %")
                             ax.set_xlabel("Layers")
                             ax.set_ylabel("BLEU")
-                            # ax.legend()
+                            ax.legend()
                             # ax.legend(loc='upper left', bbox_to_anchor=(1,1))
-                plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.27), ncol=3)  # Adjust vertical space here
+                # plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.27), ncol=3)  # Adjust vertical space here
                 plt.suptitle(d_ttl, fontsize=16)
                 plt.savefig(os.path.join(plot_loc, f"{cat_ttl}_{direction}.png"))
 

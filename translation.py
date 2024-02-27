@@ -26,6 +26,9 @@ import copy
 import sys
 import torch 
 
+from langdetect import detect
+import langdetect
+
 # model_list = ["facebook/xglm-564M", "facebook/xglm-1.7B", "facebook/xglm-2.9B", "facebook/xglm-4.5B", "facebook/xglm-7.5B"]
 # model_list = ["facebook/xglm-4.5B","facebook/xglm-2.9B","facebook/xglm-1.7B","facebook/xglm-564M"]
 # model_list = ["facebook/xglm-7.5B"]
@@ -48,9 +51,10 @@ class TranslationLM():
     nf4_config = BitsAndBytesConfig(
                   load_in_8bit=True,
                   bnb_8bit_use_double_quant=True,
-                  bnb_8bit_quant_type="nf4",
+                #   bnb_8bit_quant_type="nf4",
+                  bnb_8bit_quant_type="fp4",
                   bnb_8bit_compute_dtype=torch.bfloat16,
-                  llm_int8_skip_modules= ['lm_head'],
+                #   llm_int8_skip_modules= ['lm_head'],
                   # load_in_8bit=True,
                   # load_in_4bit=True,xx
                   # bnb_4bit_use_double_quant=False,
@@ -59,7 +63,7 @@ class TranslationLM():
                    )
     self.model = AutoModelForCausalLM.from_pretrained(model_name,
                                                 quantization_config=nf4_config,
-                                                torch_dtype=torch.float16,
+                                                # torch_dtype=torch.float16,
                                                 low_cpu_mem_usage=True,
                                                 cache_dir="transformers_cache"
                                                 )
@@ -122,7 +126,7 @@ class TranslationLM():
       #                             repetition_penalty=0.6, top_k=50, top_p=0.95, temperature=0.5)
       # output_ids = model.generate(input_ids, max_length=res_len, num_beams=5, repetition_penalty=1.0, temperature=0.6)
       output_ids = model.generate(input_ids, do_sample=True, max_length=res_len, num_beams=5,
-                                  repetition_penalty=1.0, temperature=1.0)
+                                  ptop_k=15, top_p=0.95, temperature=1.2, early_stopping=True
       
       result = output_ids[0][input_ids.shape[1]:]
       output_text = self.tokenizer.decode(result, skip_special_tokens=True)
@@ -138,6 +142,20 @@ class TranslationLM():
 def make_folder(loc):
   if not os.path.exists(loc):
     os.mkdir(loc)
+
+def filter_foreign_languages(sentence, target_lang='en'):
+    words = sentence.split()
+    filtered_sentence = ' '.join([word for word in words if detect_language(word, target_lang)])
+    return filtered_sentence
+
+def detect_language(word, target_lang):
+    try:
+        # Detect the language of the word
+        lang = detect(word)
+        return lang == target_lang
+    except langdetect.lang_detect_exception.LangDetectException:
+        # In case of detection error, assume the word is in the target language to keep it
+        return True
 
 def run_translation(save_path  = None, model_obj=None, lobotomized_model=None, lang1=None, lang2=None, data_l1=None, data_l2=None, freeze=None, freeze_category=None):
   if not lobotomized_model:
@@ -173,20 +191,17 @@ def run_translation(save_path  = None, model_obj=None, lobotomized_model=None, l
     example_prompt_l2 = ""
 
     for e in range(i+1,i+3):
-      example_prompt_l1 += f" {lang1}: {data_l1[e]}\n{lang2}: {data_l2[e]}\n"
-      example_prompt_l2 += f" {lang2}: {data_l2[e]}\n{lang1}: {data_l1[e]}\n"
+      example_prompt_l1 += f"{lang1}: {data_l1[e]} = {lang2}: {data_l2[e]} ### "
+      example_prompt_l2 += f"{lang2}: {data_l2[e]} = {lang1}: {data_l1[e]} ### "
     
     
-    prompt2l2 = example_prompt_l1+ f"{lang1}: {actual_l1}\n{lang2}: "
-    prompt2l1 = example_prompt_l2+ f"{lang2}: {actual_l2}\n{lang1}: "
-    
-    # print(prompt2l2)
-    # print(prompt2l1)
+    prompt2l2 = example_prompt_l1+ f"{lang1}: {actual_l1} = {lang2}: "
+    prompt2l1 = example_prompt_l2+ f"{lang2}: {actual_l2} = {lang1}: "
 
-    mt_l2 = model_obj.translate(model_lm, prompt2l2,actual_l2)
     try:  
       mt_l2 = model_obj.translate(model_lm, prompt2l2,actual_l2)
-      
+      mt_l2 = filter_foreign_languages(mt_l2, 'en')
+
       bleu_score = bleu.compute(predictions=[mt_l2], references=[actual_l2])['bleu']
       comet_score = comet_metric.compute(predictions=[mt_l2], references=[actual_l2], sources=[actual_l1])['mean_score']
       gbleu_score = gbleu.compute(predictions=[mt_l2], references=[actual_l2])['google_bleu']
@@ -195,11 +210,13 @@ def run_translation(save_path  = None, model_obj=None, lobotomized_model=None, l
       mte_l2.append(mt_l2)
       rfe_l2.append(actual_l2)
       file_l1 = open(loc_l1,"a")  
-      print(f"{actual_l1}\t{actual_l2}\t{mt_l2}\t{bleu_score}\t{gbleu_score}\t{comet_score}",file=file_l1)
+      print(f"{actual_l1}\t{actual_l2}\t{mt_l2}\t{bleu_score*100}\t{gbleu_score*100}\t{comet_score}",file=file_l1)
       # print(f"{actual_l1}\t{actual_l2}\t{mt_l2}\t{bleu_score}\t{gbleu_score}\t{comet_score}")
       file_l1.close()
 
       mt_l1 = model_obj.translate(model_lm, prompt2l1,actual_l1)
+      mt_l1 = filter_foreign_languages(mt_l1, 'cs')
+
       bleu_score = bleu.compute(predictions=[mt_l1], references=[actual_l1])['bleu']
       comet_score = comet_metric.compute(predictions=[mt_l1], references=[actual_l2], sources=[actual_l1])['mean_score']
       gbleu_score = gbleu.compute(predictions=[mt_l1], references=[actual_l1])['google_bleu']
@@ -208,7 +225,7 @@ def run_translation(save_path  = None, model_obj=None, lobotomized_model=None, l
       mte_l1.append(mt_l1)
       rfe_l1.append(actual_l1)
       file_l2 = open(loc_l2,"a")  
-      print(f"{actual_l2}\t{actual_l1}\t{mt_l1}\t{bleu_score}\t{gbleu_score}\t{comet_score}",file=file_l2)
+      print(f"{actual_l2}\t{actual_l1}\t{mt_l1}\t{bleu_score*100}\t{gbleu_score*100}\t{comet_score}",file=file_l2)
       # print(f"{actual_l2}\t{actual_l1}\t{mt_l1}\t{bleu_score}\t{gbleu_score}\t{comet_score}")
       file_l2.close()
 
@@ -225,7 +242,7 @@ def run_translation(save_path  = None, model_obj=None, lobotomized_model=None, l
   corp_bleu_l2  = bleu.compute(predictions=mte_l2, references=rfe_l2)['bleu']
   corp_bleu_l1  = bleu.compute(predictions=mte_l1, references=rfe_l1)['bleu']
   del model_lm
-  return corp_bleu_l1, corp_bleu_l2, corp_gbleu_l1, corp_gbleu_l2
+  return corp_bleu_l1*100, corp_bleu_l2*100, corp_gbleu_l1*100, corp_gbleu_l2*100
   
 if __name__ == "__main__":
   
