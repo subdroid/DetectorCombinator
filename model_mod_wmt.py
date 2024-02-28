@@ -185,6 +185,12 @@ ec_cs_file = open(os.path.join(data_loc, 'csen_cs.txt'),"r").readlines()
 ec_en_file = open(os.path.join(data_loc, 'csen_en.txt'),"r").readlines()
 eh_hi_file = open(os.path.join(data_loc, 'hien_hi.txt'),"r").readlines()
 eh_en_file = open(os.path.join(data_loc, 'hien_en.txt'),"r").readlines()
+ed_de_file = open(os.path.join(data_loc, 'deen_de.txt'),"r").readlines()
+ed_en_file = open(os.path.join(data_loc, 'deen_en.txt'),"r").readlines()
+ef_fr_file = open(os.path.join(data_loc, 'fren_fr.txt'),"r").readlines()
+ef_en_file = open(os.path.join(data_loc, 'fren_en.txt'),"r").readlines()
+
+
 f_path = os.path.join(os.getcwd(),"results") 
 if os.path.exists(f_path):
     shutil.rmtree(f_path)
@@ -192,9 +198,15 @@ os.mkdir(f_path)
 fol_path = os.path.join(f_path,model_name)
 if not os.path.exists(fol_path):
     os.mkdir(fol_path)
+
 process_language("cs",ec_cs_file,fol_path)
-process_language("Encs",en1,fol_path)
-process_language("hi",hi,fol_path)
-process_language("Enhi",en2,fol_path)
+process_language("Encs",ec_en,fol_path)
+process_language("hi",eh_hi,fol_path)
+process_language("Enhi",eh_en,fol_path)
+process_language("de",ed_de,fol_path)
+process_language("Ende",ed_en,fol_path)
+process_language("fr",ef_fr,fol_path)
+process_language("Enfr",ef_en,fol_path)
+
 
 # shutil.rmtree('transformers_cache')
