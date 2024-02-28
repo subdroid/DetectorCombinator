@@ -51,10 +51,10 @@ class TranslationLM():
     nf4_config = BitsAndBytesConfig(
                   load_in_8bit=True,
                   bnb_8bit_use_double_quant=True,
-                #   bnb_8bit_quant_type="nf4",
-                  bnb_8bit_quant_type="fp4",
+                  bnb_8bit_quant_type="nf4",
+                  # bnb_8bit_quant_type="fp4",
                   bnb_8bit_compute_dtype=torch.bfloat16,
-                #   llm_int8_skip_modules= ['lm_head'],
+                  llm_int8_skip_modules= ['lm_head'],
                   # load_in_8bit=True,
                   # load_in_4bit=True,xx
                   # bnb_4bit_use_double_quant=False,
@@ -122,11 +122,12 @@ class TranslationLM():
       inputs = self.tokenizer(input_text, padding=True, return_tensors="pt").to(self.device)
       result_id = self.tokenizer(result, padding=True, return_tensors="pt").to(self.device)["input_ids"]
       res_len = input_ids.shape[1] + result_id.shape[1] + 10
+      out_len = result_id.shape[1] + 10
       # output_ids = model.generate(input_ids, do_sample=True, max_length=res_len, num_beams=5,
       #                             repetition_penalty=0.6, top_k=50, top_p=0.95, temperature=0.5)
       # output_ids = model.generate(input_ids, max_length=res_len, num_beams=5, repetition_penalty=1.0, temperature=0.6)
-      output_ids = model.generate(input_ids, do_sample=True, max_length=res_len, num_beams=5,
-                                  ptop_k=15, top_p=0.95, temperature=1.2, early_stopping=True
+      output_ids = model.generate(input_ids, do_sample=False, max_length=res_len, num_beams=5, repetition_penalty=1.5, temperature=0.7)
+                                  # , early_stopping=True, top_k=15, top_p=0.98)
       
       result = output_ids[0][input_ids.shape[1]:]
       output_text = self.tokenizer.decode(result, skip_special_tokens=True)
@@ -190,59 +191,63 @@ def run_translation(save_path  = None, model_obj=None, lobotomized_model=None, l
     example_prompt_l1 = ""
     example_prompt_l2 = ""
 
-    for e in range(i+1,i+3):
+    for e in range(i+1,i+2):
       example_prompt_l1 += f"{lang1}: {data_l1[e]} = {lang2}: {data_l2[e]} ### "
       example_prompt_l2 += f"{lang2}: {data_l2[e]} = {lang1}: {data_l1[e]} ### "
     
+    print(example_prompt_l1)
+    break
     
-    prompt2l2 = example_prompt_l1+ f"{lang1}: {actual_l1} = {lang2}: "
-    prompt2l1 = example_prompt_l2+ f"{lang2}: {actual_l2} = {lang1}: "
+  #   prompt2l2 = example_prompt_l1+ f"{lang1}: {actual_l1} = {lang2}: "
+  #   prompt2l1 = example_prompt_l2+ f"{lang2}: {actual_l2} = {lang1}: "
 
-    try:  
-      mt_l2 = model_obj.translate(model_lm, prompt2l2,actual_l2)
-      mt_l2 = filter_foreign_languages(mt_l2, 'en')
+  #   try:  
+  #     mt_l2 = model_obj.translate(model_lm, prompt2l2,actual_l2)
+  #     # mt_l2f = filter_foreign_languages(mt_l2, 'en')
+  #     # print(mt_l2f)
 
-      bleu_score = bleu.compute(predictions=[mt_l2], references=[actual_l2])['bleu']
-      comet_score = comet_metric.compute(predictions=[mt_l2], references=[actual_l2], sources=[actual_l1])['mean_score']
-      gbleu_score = gbleu.compute(predictions=[mt_l2], references=[actual_l2])['google_bleu']
+  #     bleu_score = bleu.compute(predictions=[mt_l2], references=[actual_l2])['bleu']
+  #     comet_score = comet_metric.compute(predictions=[mt_l2], references=[actual_l2], sources=[actual_l1])['mean_score']
+  #     gbleu_score = gbleu.compute(predictions=[mt_l2], references=[actual_l2])['google_bleu']
 
-      src_l1.append(actual_l1)
-      mte_l2.append(mt_l2)
-      rfe_l2.append(actual_l2)
-      file_l1 = open(loc_l1,"a")  
-      print(f"{actual_l1}\t{actual_l2}\t{mt_l2}\t{bleu_score*100}\t{gbleu_score*100}\t{comet_score}",file=file_l1)
-      # print(f"{actual_l1}\t{actual_l2}\t{mt_l2}\t{bleu_score}\t{gbleu_score}\t{comet_score}")
-      file_l1.close()
+  #     src_l1.append(actual_l1)
+  #     mte_l2.append(mt_l2)
+  #     rfe_l2.append(actual_l2)
+  #     file_l1 = open(loc_l1,"a")  
+  #     print(f"{actual_l1}\t{actual_l2}\t{mt_l2}\t{bleu_score*100}\t{gbleu_score*100}\t{comet_score}",file=file_l1)
+  #     # print(f"{actual_l1}\t{actual_l2}\t{mt_l2}\t{bleu_score}\t{gbleu_score}\t{comet_score}")
+  #     file_l1.close()
 
-      mt_l1 = model_obj.translate(model_lm, prompt2l1,actual_l1)
-      mt_l1 = filter_foreign_languages(mt_l1, 'cs')
+  #     mt_l1 = model_obj.translate(model_lm, prompt2l1,actual_l1)
+  #     # mt_l1f = filter_foreign_languages(mt_l1, 'cs')
+  #     # print(mt_l1f)
 
-      bleu_score = bleu.compute(predictions=[mt_l1], references=[actual_l1])['bleu']
-      comet_score = comet_metric.compute(predictions=[mt_l1], references=[actual_l2], sources=[actual_l1])['mean_score']
-      gbleu_score = gbleu.compute(predictions=[mt_l1], references=[actual_l1])['google_bleu']
+  #     bleu_score = bleu.compute(predictions=[mt_l1], references=[actual_l1])['bleu']
+  #     comet_score = comet_metric.compute(predictions=[mt_l1], references=[actual_l2], sources=[actual_l1])['mean_score']
+  #     gbleu_score = gbleu.compute(predictions=[mt_l1], references=[actual_l1])['google_bleu']
       
-      src_l1.append(actual_l2)
-      mte_l1.append(mt_l1)
-      rfe_l1.append(actual_l1)
-      file_l2 = open(loc_l2,"a")  
-      print(f"{actual_l2}\t{actual_l1}\t{mt_l1}\t{bleu_score*100}\t{gbleu_score*100}\t{comet_score}",file=file_l2)
-      # print(f"{actual_l2}\t{actual_l1}\t{mt_l1}\t{bleu_score}\t{gbleu_score}\t{comet_score}")
-      file_l2.close()
+  #     src_l1.append(actual_l2)
+  #     mte_l1.append(mt_l1)
+  #     rfe_l1.append(actual_l1)
+  #     file_l2 = open(loc_l2,"a")  
+  #     print(f"{actual_l2}\t{actual_l1}\t{mt_l1}\t{bleu_score*100}\t{gbleu_score*100}\t{comet_score}",file=file_l2)
+  #     # print(f"{actual_l2}\t{actual_l1}\t{mt_l1}\t{bleu_score}\t{gbleu_score}\t{comet_score}")
+  #     file_l2.close()
 
-      count += 1
-    except:
-      print("Error in translation")
-      continue  
+  #     count += 1
+  #   except:
+  #     print("Error in translation")
+  #     continue  
     
-    if count==5:
-      break
+  #   if count==10:
+  #     break
   
-  corp_gbleu_l2 = gbleu.compute(predictions=mte_l2, references=rfe_l2)['google_bleu']
-  corp_gbleu_l1 = gbleu.compute(predictions=mte_l1, references=rfe_l1)['google_bleu']
-  corp_bleu_l2  = bleu.compute(predictions=mte_l2, references=rfe_l2)['bleu']
-  corp_bleu_l1  = bleu.compute(predictions=mte_l1, references=rfe_l1)['bleu']
-  del model_lm
-  return corp_bleu_l1*100, corp_bleu_l2*100, corp_gbleu_l1*100, corp_gbleu_l2*100
+  # corp_gbleu_l2 = gbleu.compute(predictions=mte_l2, references=rfe_l2)['google_bleu']
+  # corp_gbleu_l1 = gbleu.compute(predictions=mte_l1, references=rfe_l1)['google_bleu']
+  # corp_bleu_l2  = bleu.compute(predictions=mte_l2, references=rfe_l2)['bleu']
+  # corp_bleu_l1  = bleu.compute(predictions=mte_l1, references=rfe_l1)['bleu']
+  # del model_lm
+  # return corp_bleu_l1*100, corp_bleu_l2*100, corp_gbleu_l1*100, corp_gbleu_l2*100
   
 if __name__ == "__main__":
   
