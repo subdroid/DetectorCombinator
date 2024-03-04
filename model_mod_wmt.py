@@ -99,10 +99,7 @@ class model_load():
                 trg = fc1[0,-1,:].unsqueeze(0).detach().cpu()
                 activation = torch.relu(fc1[0,-1,:]).unsqueeze(0).detach().cpu()
                 activations.append(activation)
-        #         det_act = torch.softmax(fc1[0,-1,:],dim=-1).unsqueeze(0).detach().cpu()
-        #         expectation = trg * det_act
-        #         expectations.append(expectation)
-        # #         activations.append(expectation)
+        
         stacked_tensor = activations[0]
         for i in range(1,len(activations)):
             if len(stacked_tensor.shape)==1:
@@ -110,28 +107,47 @@ class model_load():
             if len(activations[i].shape)==1:
                 activations[i] = activations[i].unsqueeze(0)
             stacked_tensor = torch.cat((stacked_tensor, activations[i]), dim=0)
-        # stacked_tensor2 = expectations[0]
-        # for i in range(1,len(expectations)):
-        #     if len(stacked_tensor2.shape)==1:
-        #         stacked_tensor2 = stacked_tensor2.unsqueeze(0)
-        #     if len(expectations[i].shape)==1:
-        #         expectations[i] = expectations[i].unsqueeze(0)
-        #     stacked_tensor2 = torch.cat((stacked_tensor2, expectations[i]), dim=0)
-        # return stacked_tensor, stacked_tensor2
+        
         return stacked_tensor
+    
+    def process_activations_combinators(self, ffn_hooks):
+        activations = []
+        layer_predictions = []
+        for key in ffn_hooks.keys():
+            key_name = str(key).split(".")[-1]
+            if key_name == "fc2":
+                fc2 = ffn_hooks[key]
+                combination = torch.relu(fc2[0,-1,:]).detach().cpu()
+                activations.append(combination)
+
+        stacked_tensor = activations[0]
+        for i in range(1,len(activations)):
+            if len(stacked_tensor.shape)==1:
+                stacked_tensor = stacked_tensor.unsqueeze(0)
+            if len(activations[i].shape)==1:
+                activations[i] = activations[i].unsqueeze(0)
+            stacked_tensor = torch.cat((stacked_tensor, activations[i]), dim=0)
+        
+        return stacked_tensor
+
     
     def process_sentence(self, sentence):
         n_lyrs = self.model.config.num_layers
         ff_dim = self.model.config.ffn_dim
-        prefixes, predictions  = self.autoregressive_formatting(sentence)
-        detector_activations   = torch.zeros((n_lyrs,ff_dim))
+        model_dim = self.model.config.d_model
+        
+        prefixes, predictions    = self.autoregressive_formatting(sentence)
+        detector_activations     = torch.zeros((n_lyrs,ff_dim))
+        combinator_activations   = torch.zeros((n_lyrs,model_dim))
+        
         for prefix, prediction in zip(prefixes, predictions):
             pred, ffn_hooks = self.model_forward(prefix.strip())
-            act_detector = self.process_activations_detectors(ffn_hooks)
-            # act_detector, exp_detector   = self.process_activations_detectors(ffn_hooks)
+            act_detector   = self.process_activations_detectors(ffn_hooks)
+            act_combinator = self.process_activations_combinators(ffn_hooks)
             detector_activations  += act_detector
-        # print(detector_activations.shape)
-        return detector_activations
+            combinator_activations += act_combinator
+
+        return detector_activations, combinator_activations
             
     def model_forward(self, prefix):
         # # Encode the sentence
@@ -151,22 +167,24 @@ def init_files(fol_path,lang):
   fol_path_act = os.path.join(fol_path,"detector_act") 
   if not os.path.exists(fol_path_act):
     os.mkdir(fol_path_act)
-#   print(fol_path_act)
-#   fiile_name = lang + ".csv"
-#   lang_file = os.path.join(fol_path_act,fiile_name)
-#   l_fl = open(lang_file,"w")
-#   l_fl.close()
-
 
 def process_language(lang,sent_list,fol_path):
     init_files(fol_path,lang)
+    count = 0
     for sent in tqdm(sent_list):
-        act_detector = model_obj.process_sentence(sent)
-        update_activations(act_detector.numpy(),fol_path,lang)
-
-def update_activations(act,file_path,lang):
+        act_detector, act_combinator = model_obj.process_sentence(sent)
+        update_activations(act_detector.numpy(),act_combinator.numpy(),fol_path,lang)
+        count+=1
+        if count==1000:
+            break
+        
+def update_activations(act,com,file_path,lang):
+    det = os.path.join(file_path,"detector_act")
+    if not os.path.exists(det):
+        os.mkdir(det)
+        
     file_name = lang + ".csv"
-    lang_file = os.path.join(fol_path,file_name)
+    lang_file = os.path.join(det,file_name)
     if not os.path.exists(lang_file):
         detector_activations = np.zeros((num_layers,num_hidden))
     else:
@@ -175,11 +193,35 @@ def update_activations(act,file_path,lang):
     with open(lang_file, 'w', newline='') as csvfile:
         csv_writer = csv.writer(csvfile)
         csv_writer.writerows(detector_activations)
+    
+    comb = os.path.join(file_path,"combinator_act")
+    if not os.path.exists(comb):
+        os.mkdir(comb)
+    
+    lang_file = os.path.join(comb,file_name)
+    if not os.path.exists(lang_file):
+        combinator_activations = np.zeros((num_layers,num_model))
+    else:
+        combinator_activations = np.loadtxt(lang_file, delimiter=',', ndmin=2)
+    combinator_activations += com
+    with open(lang_file, 'w', newline='') as csvfile:
+        csv_writer = csv.writer(csvfile)
+        csv_writer.writerows(combinator_activations)
 
 model_obj = model_load(model_list[int(sys.argv[1])])
 model_name = model_list[int(sys.argv[1])].split("/")[-1]
 num_layers = model_obj.model.config.num_layers
 num_hidden = model_obj.model.config.ffn_dim
+num_model  = model_obj.model.config.d_model
+
+f_path = os.path.join(os.getcwd(),"results") 
+if not os.path.exists(f_path):
+    os.mkdir(f_path)
+fol_path = os.path.join(f_path,model_name)
+if os.path.exists(fol_path):
+    shutil.rmtree(fol_path)
+os.mkdir(fol_path)
+
 data_loc = os.path.join(os.getcwd(), 'data')
 ec_cs_file = open(os.path.join(data_loc, 'csen_cs.txt'),"r").readlines()
 ec_en_file = open(os.path.join(data_loc, 'csen_en.txt'),"r").readlines()
@@ -191,22 +233,14 @@ ef_fr_file = open(os.path.join(data_loc, 'fren_fr.txt'),"r").readlines()
 ef_en_file = open(os.path.join(data_loc, 'fren_en.txt'),"r").readlines()
 
 
-f_path = os.path.join(os.getcwd(),"results") 
-if os.path.exists(f_path):
-    shutil.rmtree(f_path)
-os.mkdir(f_path)
-fol_path = os.path.join(f_path,model_name)
-if not os.path.exists(fol_path):
-    os.mkdir(fol_path)
-
 process_language("cs",ec_cs_file,fol_path)
-process_language("Encs",ec_en,fol_path)
-process_language("hi",eh_hi,fol_path)
-process_language("Enhi",eh_en,fol_path)
-process_language("de",ed_de,fol_path)
-process_language("Ende",ed_en,fol_path)
-process_language("fr",ef_fr,fol_path)
-process_language("Enfr",ef_en,fol_path)
+process_language("Encs",ec_en_file,fol_path)
+process_language("hi",eh_hi_file,fol_path)
+process_language("Enhi",eh_en_file,fol_path)
+process_language("de",ed_de_file,fol_path)
+process_language("Ende",ed_en_file,fol_path)
+process_language("fr",ef_fr_file,fol_path)
+process_language("Enfr",ef_en_file,fol_path)
 
 
 # shutil.rmtree('transformers_cache')

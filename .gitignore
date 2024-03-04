@@ -11,5 +11,6 @@
 **/.history-bhattacharya
 **/*.log
 **/*.out
-
+**/*.err
+**/model_entropy/*.csv
 
