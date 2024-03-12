@@ -32,13 +32,19 @@ class find_multilingual_neurons():
                 for index, ind in enumerate(indices):
                     row[str(ind)] = row_data[index]
                 sorted_items = sorted(row.items(), key=lambda item: item[1], reverse=True)
-                sorted_row = dict(sorted_items)
-                # print(sorted_row)
-                # lang_data[str(rid)] = row
+                sorted_row = {}
+                for it in sorted_items:
+                    sorted_row[it[0]]=it[1]
                 lang_data[str(rid)] = sorted_row
+                # print(sorted_row)
+                # print(sorted_items)
+                # sorted_row = []
+                # for it in sorted_items:
+                #     sorted_row.append(it[0])
+                # break
             save_loc = os.path.join(model_neuron_loc,lang_name+".json")
-            with open(save_loc, 'a') as file:
-                json.dump(lang_data, file, indent=4)
+            with open(save_loc,"w") as f:
+                json.dump(lang_data,f)
              
     def create_dic(self):
         neuron_loc = os.path.join(os.getcwd(),"neuron_lists")
@@ -50,7 +56,8 @@ class find_multilingual_neurons():
             self.extract_dictionary(detector_loc,neuron_loc,'detector',models)
             combinator_loc = os.path.join(self.model_loc, 'combinator_act')
             self.extract_dictionary(combinator_loc,neuron_loc,'combinator',models)
-        
+            # break
+
     def check_entropy(self):
         model_entropy_loc = os.path.join(os.getcwd(),"model_entropy")
         if not os.path.exists(model_entropy_loc):
@@ -83,7 +90,6 @@ class find_multilingual_neurons():
                         ent = "{:.2e}".format(ent)
                         entropy[lang_name][rid] = ent
                 entropy_df = pd.DataFrame(entropy)
-                # print(os.path.join(model_entropy_loc,models+"_"+cat+".csv"))
                 entropy_df.to_csv(os.path.join(model_entropy_loc,models+"_"+cat+".csv"))
                 english_files = ["Enhi","Enfr","Encs","Ende"]
                 # # line_styles = ['-', '--', '-.', ':']  # Different line styles
@@ -101,8 +107,11 @@ class find_multilingual_neurons():
                         color = colors[3]
                     try:
                         data = entropy_df[c]
+                        D = []
+                        for d in data.keys():
+                            D.append(float(data[d]))
                         c_label = c[:2]+"("+c[2:]+")"
-                        plt.plot(data,linestyle='-', marker='o',color=color,label=c_label)
+                        plt.plot(D,linestyle='-', marker='o',color=color,label=c_label)
                     except KeyError:
                         print(f"Caught Key Error:\t{models}\t{cat}")
                 model_name = models.replace('.','-')
@@ -115,7 +124,9 @@ class find_multilingual_neurons():
                 plt.title(f"Entropy of {cat_title} for {models}")
                 plt.ylabel('Entropy')
                 plt.xlabel('Layer No.')
-                plt.savefig(os.path.join(entropy_cat_loc,"english_"+model_name))
+                plt.tight_layout()
+                # plt.savefig(os.path.join(entropy_cat_loc,"english_"+model_name))
+                plt.savefig(os.path.join(entropy_cat_loc,"english_"+model_name+".pdf"))
                 plt.close()
                 plt.clf()
                 for c in entropy_df.columns:
@@ -129,7 +140,11 @@ class find_multilingual_neurons():
                         if c=='hi':
                             color = colors[3]
                         data = entropy_df[c]
-                        plt.plot(data,linestyle='-', marker='o',color=color,label=c)
+                        D = []
+                        for d in data.keys():
+                            D.append(float(data[d]))
+                        plt.plot(D,linestyle='-', marker='o',color=color,label=c)
+                        # plt.plot(data,linestyle='-', marker='o',color=color,label=c)
                 plt.gca().yaxis.set_ticks([]) 
                 plt.legend()
                 if cat=='detector_act':
@@ -139,7 +154,8 @@ class find_multilingual_neurons():
                 plt.title(f"Entropy of {cat_title} for {models}")
                 plt.ylabel('Entropy')
                 plt.xlabel('Layer')
-                plt.savefig(os.path.join(entropy_cat_loc,"all_"+model_name))
+                # plt.savefig(os.path.join(entropy_cat_loc,"all_"+model_name))
+                plt.savefig(os.path.join(entropy_cat_loc,"all_"+model_name+".pdf"))
                 plt.close()
                 plt.clf()
 
@@ -187,12 +203,67 @@ class find_multilingual_neurons():
         plt.xticks(np.arange(len(legends))+0.5, legends, fontsize=8, weight='bold')
         plt.yticks(np.arange(len(legends))+0.5, legends, fontsize=8, weight='bold')
         plt.grid(which="minor", color="black", linewidth=1)
-        plt.savefig("overlap_english_sents")
+        # plt.savefig("overlap_english_sents")
+        plt.savefig("overlap_english_sents.pdf")
         return None
 
-    def sort_dic(self):
-        neuron_list_loc 
-        return None
+    def compare_english(self):
+        neuron_list_loc = os.path.join(os.getcwd(),"neuron_lists")
+        english_files = ["Encs.json","Ende.json","Enfr.json","Enhi.json"]
+        plot_loc = os.path.join(os.getcwd(),"english_overlap")
+        if not os.path.exists(plot_loc):
+            os.mkdir(plot_loc)
+        for models in os.listdir(neuron_list_loc):
+            model_name = models.replace('.','_')
+            model_loc = os.path.join(neuron_list_loc,models)
+            for cat in os.listdir(model_loc):
+                cat_loc = os.path.join(model_loc,cat)
+                # freeze = [0.05,0.10,0.20,0.30,0.40,0.50]
+                freeze = [0.05,0.20,0.40,0.80]
+                n_subplots = len(freeze)
+                n_cols = 2
+                n_rows = math.ceil(n_subplots/n_cols)
+                fig, axs = plt.subplots(n_rows, n_cols, figsize=(5  *n_cols, 4*n_rows)) 
+                fig.subplots_adjust(hspace=0.5)  # Increase vertical space between rows
+                markers = ['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'H', '+', 'x', 'D', 'd', '|', '_']
+                colors  = ["salmon","darkorange","teal","royalblue"]  
+                for fid, f in enumerate(freeze):
+                    ax = axs[fid//2,fid%2] if n_subplots > 1 else axs
+                    for i in range(len(english_files)):
+                        for j in range(len(english_files)):
+                            if i!=j:
+                                i_tile = english_files[i].replace('.json','')
+                                j_tile = english_files[j].replace('.json','')
+                                f_loc1 = os.path.join(cat_loc,english_files[i])
+                                df1    = json.load(open(f_loc1,"r"))
+                                f_loc2 = os.path.join(cat_loc,english_files[j])
+                                df2    = json.load(open(f_loc2,"r"))
+                                match  = []
+                                for lyr in df1.keys():
+                                    D1 = list(df1[lyr].keys())
+                                    D2 = list(df2[lyr].keys())
+                                    l_total = len(D1) 
+                                    freeze_len = int(len(D1)*f)
+                                    D1 = D1[:freeze_len]
+                                    D2 = D2[:freeze_len]
+                                    D1 = set(D1)
+                                    D2 = set(D2)
+                                    intersection = D1.intersection(D2)
+                                    ratio = np.around((len(intersection)/len(D1))*100,2)
+                                    match.append(ratio)
+                                ttl = str(f)+"_"+i_tile+"_"+j_tile
+                                ax.title.set_text(f"freeze (top {int(f*100)}%): {freeze_len} neurons of {l_total}")
+                                ax.plot(match, label=ttl, marker=markers[fid], color=colors[j])
+                        break
+                    ax.legend()
+                plt.legend()
+                plt.suptitle(f"Overlap of English specific neurons: {model_name} ({cat})", fontsize=22)
+                fig_loc = os.path.join(plot_loc,model_name+"_"+cat  +".pdf")
+                plt.tight_layout()
+                plt.savefig(fig_loc)
+                plt.close()
+                plt.clf()
+
 find_neurons = find_multilingual_neurons()
 # find_neurons.find_eng_overlap()
 # find_neurons.check_entropy()

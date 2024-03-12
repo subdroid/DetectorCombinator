@@ -11,6 +11,7 @@ import numpy as np
 import csv
 import concurrent.futures
 import shutil
+import pandas as pd
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 torch.set_float32_matmul_precision('medium')  
@@ -20,10 +21,9 @@ model_list = ["facebook/xglm-564M", "facebook/xglm-1.7B", "facebook/xglm-2.9B", 
 class model_load():    
     def __init__(self, model_name):
         self.model_name = model_name
-        
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name,cache_dir="transformers_cache")
+        # print(self.model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name,cache_dir=".cache")
 
-        # self.model = XGLMForCausalLM.from_pretrained(model_name,cache_dir="transformers_cache")
         nf4_config = BitsAndBytesConfig(
                     load_in_8bit=True,
                     bnb_8bit_use_double_quant=True,
@@ -32,6 +32,7 @@ class model_load():
                     bnb_8bit_compute_dtype=torch.bfloat16,
                     llm_int8_skip_modules= ['lm_head'],
                     )
+        
         try:
             self.model = AutoModelForCausalLM.from_pretrained(model_name,
                                                     quantization_config=nf4_config,
@@ -41,16 +42,11 @@ class model_load():
         except ImportError:
             self.model = XGLMForCausalLM.from_pretrained(model_name,cache_dir=".cache")
                                             
-                                                    
         self.model.eval()
 
-        # # self.model_name = model_name
-        # # self.model = XGLMForCausalLM.from_pretrained(model_name,cache_dir="transformers_cache")
-        # # self.tokenizer = XGLMTokenizer.from_pretrained(model_name,cache_dir="transformers_cache")
-        # # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # # self.model.to(self.device)
-        # # self.model.eval()
-        
+        # for name,params in self.model.named_parameters():
+        #     print(name, params.shape, params.data.dtype)
+
         self.activations = {}  # Dictionary to store layer activations
 
         # Define hook function to store activations
@@ -177,40 +173,64 @@ def process_language(lang,sent_list,fol_path):
     count = 0
     for sent in tqdm(sent_list):
         act_detector, act_combinator = model_obj.process_sentence(sent)
-        update_activations(act_detector.numpy(),act_combinator.numpy(),fol_path,lang)
+        update_activations(count,act_detector.numpy(),act_combinator.numpy(),fol_path,lang)
         count+=1
         if count==1000:
             break
         
-def update_activations(act,com,file_path,lang):
+def update_activations(count,act,com,file_path,lang):
     det = os.path.join(file_path,"detector_act")
     if not os.path.exists(det):
         os.mkdir(det)
-        
-    file_name = lang + ".csv"
-    lang_file = os.path.join(det,file_name)
-    if not os.path.exists(lang_file):
-        detector_activations = np.zeros((num_layers,num_hidden))
-    else:
-        detector_activations = np.loadtxt(lang_file, delimiter=',', ndmin=2)
-    detector_activations += act
-    with open(lang_file, 'w', newline='') as csvfile:
-        csv_writer = csv.writer(csvfile)
-        csv_writer.writerows(detector_activations)
-    
+    det = os.path.join(det,lang)
+    if not os.path.exists(det):
+        os.mkdir(det)
+    det = os.path.join(det,str(count))
+    if not os.path.exists(det):
+        os.mkdir(det)
+
+    for lyr in range(act.shape[0]):
+        lyr_data = act[lyr]
+        lyr_data = lyr_data[:, np.newaxis].T
+        # file_name = lang + "_lyr" + str(lyr) + ".csv"
+        file_name = lang + "_lyr" + str(lyr) + ".npy"
+        file_loc = os.path.join(det,file_name)
+        #if not os.path.exists(file_loc):
+        #    df = lyr_data
+        #else:
+        #    df = pd.read_csv(file_loc,index_col=0)
+        #    df = df.to_numpy()
+        #    df = np.vstack((df,lyr_data))
+        #df_new = pd.DataFrame(df)
+        #df_new.to_csv(file_loc, header=True)
+        np.save(file_loc,lyr_data)
+
     comb = os.path.join(file_path,"combinator_act")
     if not os.path.exists(comb):
         os.mkdir(comb)
-    
-    lang_file = os.path.join(comb,file_name)
-    if not os.path.exists(lang_file):
-        combinator_activations = np.zeros((num_layers,num_model))
-    else:
-        combinator_activations = np.loadtxt(lang_file, delimiter=',', ndmin=2)
-    combinator_activations += com
-    with open(lang_file, 'w', newline='') as csvfile:
-        csv_writer = csv.writer(csvfile)
-        csv_writer.writerows(combinator_activations)
+    comb = os.path.join(comb,lang)
+    if not os.path.exists(comb):
+        os.mkdir(comb)
+    comb = os.path.join(comb,str(count))
+    if not os.path.exists(comb):
+        os.mkdir(comb)
+
+    for lyr in range(com.shape[0]):
+        lyr_data = com[lyr]
+        lyr_data = lyr_data[:, np.newaxis].T
+        # file_name = lang + "_lyr" + str(lyr) + ".csv"
+        file_name = lang + "_lyr" + str(lyr) + ".npy"
+        file_loc = os.path.join(comb,file_name)
+        #if not os.path.exists(file_loc):
+        #    df = lyr_data
+        #else:
+        #    df = pd.read_csv(file_loc,index_col=0)
+        #    df = df.to_numpy()
+        #    df = np.vstack((df,lyr_data))
+        np.save(file_loc,lyr_data)
+        
+        # df_new = pd.DataFrame(df)
+        # df_new.to_csv(file_loc, header=True)
 
 model_obj = model_load(model_list[int(sys.argv[1])])
 model_name = model_list[int(sys.argv[1])].split("/")[-1]
@@ -218,7 +238,7 @@ num_layers = model_obj.model.config.num_layers
 num_hidden = model_obj.model.config.ffn_dim
 num_model  = model_obj.model.config.d_model
 
-f_path = os.path.join(os.getcwd(),"results") 
+f_path = os.path.join(os.getcwd(),"results_english") 
 if not os.path.exists(f_path):
     os.mkdir(f_path)
 fol_path = os.path.join(f_path,model_name)
@@ -227,24 +247,13 @@ if os.path.exists(fol_path):
 os.mkdir(fol_path)
 
 data_loc = os.path.join(os.getcwd(), 'data')
-ec_cs_file = open(os.path.join(data_loc, 'csen_cs.txt'),"r").readlines()
 ec_en_file = open(os.path.join(data_loc, 'csen_en.txt'),"r").readlines()
-eh_hi_file = open(os.path.join(data_loc, 'hien_hi.txt'),"r").readlines()
 eh_en_file = open(os.path.join(data_loc, 'hien_en.txt'),"r").readlines()
-ed_de_file = open(os.path.join(data_loc, 'deen_de.txt'),"r").readlines()
 ed_en_file = open(os.path.join(data_loc, 'deen_en.txt'),"r").readlines()
-ef_fr_file = open(os.path.join(data_loc, 'fren_fr.txt'),"r").readlines()
 ef_en_file = open(os.path.join(data_loc, 'fren_en.txt'),"r").readlines()
 
 
-process_language("cs",ec_cs_file,fol_path)
 process_language("Encs",ec_en_file,fol_path)
-process_language("hi",eh_hi_file,fol_path)
 process_language("Enhi",eh_en_file,fol_path)
-process_language("de",ed_de_file,fol_path)
 process_language("Ende",ed_en_file,fol_path)
-process_language("fr",ef_fr_file,fol_path)
 process_language("Enfr",ef_en_file,fol_path)
-
-
-# shutil.rmtree('transformers_cache')

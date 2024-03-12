@@ -6,11 +6,16 @@
 **/multiling_detectors
 **/neuron_lists
 **/results
+**/results_english
+**/cluster_lists
 **/sorted_indices
 **/transformers_cache
 **/.history-bhattacharya
 **/*.log
 **/*.out
 **/*.err
+**/*.csv
+**/*.png
+**/*.pdf
 **/model_entropy/*.csv
 
