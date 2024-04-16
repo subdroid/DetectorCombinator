@@ -624,7 +624,8 @@ class mechanistic():
                                         print(np.repeat(i,len(results[:,i])))
                                     plt.plot(np.repeat(i,len(results[:,i])),results[:, i],color=colors[lang])
                                 plt.savefig("Demo")
-                                print(I)
+                                print(I) 
+                        
                                 break
                     break
                     #         for i in tqdm(range(results.shape[1])):
