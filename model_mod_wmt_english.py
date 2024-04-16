@@ -21,7 +21,6 @@ model_list = ["facebook/xglm-564M", "facebook/xglm-1.7B", "facebook/xglm-2.9B", 
 class model_load():    
     def __init__(self, model_name):
         self.model_name = model_name
-        # print(self.model_name)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name,cache_dir=".cache")
 
         nf4_config = BitsAndBytesConfig(
@@ -44,9 +43,6 @@ class model_load():
                                             
         self.model.eval()
 
-        # for name,params in self.model.named_parameters():
-        #     print(name, params.shape, params.data.dtype)
-
         self.activations = {}  # Dictionary to store layer activations
 
         # Define hook function to store activations
@@ -63,20 +59,19 @@ class model_load():
         self.lm_layer   = self.model.lm_head
        
     def modify_sentence(self,sentence):
+        sentence = sentence.strip()
         # Find the last character in the sentence   
         pattern = r'[^\w\s]'
-        # Find the last character in the sentence
         last_character = re.findall(pattern, sentence[-1])
-
-        # pattern = r'[^a-zA-Z0-9\s]'
         pattern = r'[^\w\sáčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ]'
         cleaned_sentence = re.sub(pattern, '', sentence)
-
         if last_character:
             sent_temp = cleaned_sentence
-            sentence = "<s> " + sent_temp + last_character[0] + " </s>"
+            # sentence = "<s> " + sent_temp + " " + last_character[0] + " </s>"
+            sentence = sent_temp + " " + last_character[0]
         else:
-            sentence = "<s> " + cleaned_sentence + ". </s>"
+            # sentence = "<s> " + cleaned_sentence + ". </s>"
+            entence = cleaned_sentence
         return sentence
 
     def autoregressive_formatting(self, sentence):
@@ -91,43 +86,37 @@ class model_load():
         return prefixes, predictions
     
     def process_activations_detectors(self, ffn_hooks):
-        activations = []
+        representations = []
         for key in ffn_hooks.keys():
             key_name = str(key).split(".")[-1]
             if key_name == "fc1":
                 fc1 = ffn_hooks[key]
                 trg = fc1[0,-1,:].unsqueeze(0).detach().cpu()
-                activation = torch.relu(fc1[0,-1,:]).unsqueeze(0).detach().cpu()
-                activations.append(activation)
-        
-        stacked_tensor = activations[0]
-        for i in range(1,len(activations)):
+                representations.append(trg)
+        stacked_tensor = representations[0]
+        for i in range(1,len(representations)):
             if len(stacked_tensor.shape)==1:
                 stacked_tensor = stacked_tensor.unsqueeze(0)
-            if len(activations[i].shape)==1:
-                activations[i] = activations[i].unsqueeze(0)
-            stacked_tensor = torch.cat((stacked_tensor, activations[i]), dim=0)
-        
+            if len(representations[i].shape)==1:
+                activations[i] = representations[i].unsqueeze(0)
+            stacked_tensor = torch.cat((stacked_tensor, representations[i]), dim=0)
         return stacked_tensor
     
     def process_activations_combinators(self, ffn_hooks):
-        activations = []
-        layer_predictions = []
+        representations = []
         for key in ffn_hooks.keys():
             key_name = str(key).split(".")[-1]
             if key_name == "fc2":
                 fc2 = ffn_hooks[key]
-                combination = torch.relu(fc2[0,-1,:]).detach().cpu()
-                activations.append(combination)
-
-        stacked_tensor = activations[0]
-        for i in range(1,len(activations)):
+                trg = fc2[0,-1,:].unsqueeze(0).detach().cpu()
+                representations.append(trg)
+        stacked_tensor = representations[0]
+        for i in range(1,len(representations)):
             if len(stacked_tensor.shape)==1:
                 stacked_tensor = stacked_tensor.unsqueeze(0)
-            if len(activations[i].shape)==1:
-                activations[i] = activations[i].unsqueeze(0)
-            stacked_tensor = torch.cat((stacked_tensor, activations[i]), dim=0)
-        
+            if len(representations[i].shape)==1:
+                activations[i] = representations[i].unsqueeze(0)
+            stacked_tensor = torch.cat((stacked_tensor, representations[i]), dim=0)
         return stacked_tensor
 
     
@@ -139,98 +128,70 @@ class model_load():
         prefixes, predictions    = self.autoregressive_formatting(sentence)
         detector_activations     = torch.zeros((n_lyrs,ff_dim))
         combinator_activations   = torch.zeros((n_lyrs,model_dim))
-        
+        det = []
+        comb = []   
         for prefix, prediction in zip(prefixes, predictions):
             pred, ffn_hooks = self.model_forward(prefix.strip())
             act_detector   = self.process_activations_detectors(ffn_hooks)
             act_combinator = self.process_activations_combinators(ffn_hooks)
-            detector_activations  += act_detector
-            combinator_activations += act_combinator
-
-        return detector_activations, combinator_activations
+            det.append(act_detector)
+            comb.append(act_combinator)
+        return det, comb
             
     def model_forward(self, prefix):
-        # # Encode the sentence
         encoded_inputs = self.tokenizer(prefix, return_tensors="pt")
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         encoded_inputs = encoded_inputs.to(self.device)
-        # Get the model outputs
         with torch.no_grad():
             outputs = self.model(**encoded_inputs)
-            next_token_logits = outputs.logits[:, -1, :]  # Get logits for next token prediction
+            next_token_logits = outputs.logits[:, -1, :]  # Get logits for next token prediction (greedy)
             next_token_id = torch.argmax(next_token_logits, dim=-1)
             next_token = self.tokenizer.decode([next_token_id.item()])
         return next_token, self.activations
 
 
-def init_files(fol_path,lang):
-  fol_path_act = os.path.join(fol_path,"detector_act") 
-  if not os.path.exists(fol_path_act):
-    os.mkdir(fol_path_act)
-
 def process_language(lang,sent_list,fol_path):
-    init_files(fol_path,lang)
     count = 0
     for sent in tqdm(sent_list):
-        act_detector, act_combinator = model_obj.process_sentence(sent)
-        update_activations(count,act_detector.numpy(),act_combinator.numpy(),fol_path,lang)
-        count+=1
-        if count==1000:
-            break
-        
+        detector, combinator = model_obj.process_sentence(sent)
+        update_activations(count,detector,combinator,fol_path,lang)
+        # count+=1
+        # if count==1000:
+        #     break
+        # break
+
 def update_activations(count,act,com,file_path,lang):
-    det = os.path.join(file_path,"detector_act")
+    det = os.path.join(file_path,"detectors")
     if not os.path.exists(det):
         os.mkdir(det)
     det = os.path.join(det,lang)
     if not os.path.exists(det):
         os.mkdir(det)
-    det = os.path.join(det,str(count))
-    if not os.path.exists(det):
-        os.mkdir(det)
+    
+    for pid,prefix in enumerate(act):
+        for lyr in range(prefix.shape[0]):
+            lyr_loc = os.path.join(det,f"{lyr}")
+            if not os.path.exists(lyr_loc):
+                os.mkdir(lyr_loc)
+            file_name = f"{count}_{pid}.npy"
+            file_loc = os.path.join(lyr_loc,file_name)
+            np.save(file_loc,prefix[lyr])
 
-    for lyr in range(act.shape[0]):
-        lyr_data = act[lyr]
-        lyr_data = lyr_data[:, np.newaxis].T
-        # file_name = lang + "_lyr" + str(lyr) + ".csv"
-        file_name = lang + "_lyr" + str(lyr) + ".npy"
-        file_loc = os.path.join(det,file_name)
-        #if not os.path.exists(file_loc):
-        #    df = lyr_data
-        #else:
-        #    df = pd.read_csv(file_loc,index_col=0)
-        #    df = df.to_numpy()
-        #    df = np.vstack((df,lyr_data))
-        #df_new = pd.DataFrame(df)
-        #df_new.to_csv(file_loc, header=True)
-        np.save(file_loc,lyr_data)
-
-    comb = os.path.join(file_path,"combinator_act")
+    comb = os.path.join(file_path,"combinators")
     if not os.path.exists(comb):
         os.mkdir(comb)
     comb = os.path.join(comb,lang)
     if not os.path.exists(comb):
         os.mkdir(comb)
-    comb = os.path.join(comb,str(count))
-    if not os.path.exists(comb):
-        os.mkdir(comb)
-
-    for lyr in range(com.shape[0]):
-        lyr_data = com[lyr]
-        lyr_data = lyr_data[:, np.newaxis].T
-        # file_name = lang + "_lyr" + str(lyr) + ".csv"
-        file_name = lang + "_lyr" + str(lyr) + ".npy"
-        file_loc = os.path.join(comb,file_name)
-        #if not os.path.exists(file_loc):
-        #    df = lyr_data
-        #else:
-        #    df = pd.read_csv(file_loc,index_col=0)
-        #    df = df.to_numpy()
-        #    df = np.vstack((df,lyr_data))
-        np.save(file_loc,lyr_data)
-        
-        # df_new = pd.DataFrame(df)
-        # df_new.to_csv(file_loc, header=True)
+    
+    for pid,prefix in enumerate(com):
+        for lyr in range(prefix.shape[0]):
+            lyr_loc = os.path.join(comb,f"{lyr}")
+            if not os.path.exists(lyr_loc):
+                os.mkdir(lyr_loc)
+            file_name = f"{count}_{pid}.npy"
+            file_loc = os.path.join(lyr_loc,file_name)
+            np.save(file_loc,prefix[lyr])
 
 model_obj = model_load(model_list[int(sys.argv[1])])
 model_name = model_list[int(sys.argv[1])].split("/")[-1]
@@ -238,21 +199,26 @@ num_layers = model_obj.model.config.num_layers
 num_hidden = model_obj.model.config.ffn_dim
 num_model  = model_obj.model.config.d_model
 
-f_path = os.path.join(os.getcwd(),"results_english") 
+f_path = os.path.join(os.getcwd(),"model_snapshots") 
 if not os.path.exists(f_path):
     os.mkdir(f_path)
 fol_path = os.path.join(f_path,model_name)
-if os.path.exists(fol_path):
-    shutil.rmtree(fol_path)
-os.mkdir(fol_path)
+if not os.path.exists(fol_path):
+    os.mkdir(fol_path)
 
 data_loc = os.path.join(os.getcwd(), 'data')
+ec_cs_file = open(os.path.join(data_loc, 'csen_cs.txt'),"r").readlines()
+eh_hi_file = open(os.path.join(data_loc, 'hien_hi.txt'),"r").readlines()
+ed_de_file = open(os.path.join(data_loc, 'deen_de.txt'),"r").readlines()
+ef_fr_file = open(os.path.join(data_loc, 'fren_fr.txt'),"r").readlines()
+process_language("cs",ec_cs_file,fol_path)
+process_language("hi",eh_hi_file,fol_path)
+process_language("de",ed_de_file,fol_path)
+process_language("fr",ef_fr_file,fol_path)
 ec_en_file = open(os.path.join(data_loc, 'csen_en.txt'),"r").readlines()
 eh_en_file = open(os.path.join(data_loc, 'hien_en.txt'),"r").readlines()
 ed_en_file = open(os.path.join(data_loc, 'deen_en.txt'),"r").readlines()
 ef_en_file = open(os.path.join(data_loc, 'fren_en.txt'),"r").readlines()
-
-
 process_language("Encs",ec_en_file,fol_path)
 process_language("Enhi",eh_en_file,fol_path)
 process_language("Ende",ed_en_file,fol_path)

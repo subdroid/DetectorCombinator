@@ -20,10 +20,7 @@ model_list = ["facebook/xglm-564M", "facebook/xglm-1.7B", "facebook/xglm-2.9B", 
 class model_load():    
     def __init__(self, model_name):
         self.model_name = model_name
-        
         self.tokenizer = AutoTokenizer.from_pretrained(model_name,cache_dir="transformers_cache")
-
-        # self.model = XGLMForCausalLM.from_pretrained(model_name,cache_dir="transformers_cache")
         nf4_config = BitsAndBytesConfig(
                     load_in_8bit=True,
                     bnb_8bit_use_double_quant=True,
@@ -36,20 +33,11 @@ class model_load():
             self.model = AutoModelForCausalLM.from_pretrained(model_name,
                                                     quantization_config=nf4_config,
                                                     low_cpu_mem_usage=True,
-                                                    cache_dir=".cache"
+                                                    cache_dir="transformers_cache"
                                                     )
         except ImportError:
-            self.model = XGLMForCausalLM.from_pretrained(model_name,cache_dir=".cache")
-                                            
-                                                    
+            self.model = XGLMForCausalLM.from_pretrained(model_name,cache_dir="transformers_cache")                                         
         self.model.eval()
-
-        # # self.model_name = model_name
-        # # self.model = XGLMForCausalLM.from_pretrained(model_name,cache_dir="transformers_cache")
-        # # self.tokenizer = XGLMTokenizer.from_pretrained(model_name,cache_dir="transformers_cache")
-        # # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # # self.model.to(self.device)
-        # # self.model.eval()
         
         self.activations = {}  # Dictionary to store layer activations
 

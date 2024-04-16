@@ -16,3 +16,9 @@ CS_EN
 CS_EN
 EN_CS
 
+
+
+
+How do we compare clusters? 
+
+The clustering yielded us a distribution of neurons across a layer in different clusters. 

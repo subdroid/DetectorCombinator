@@ -82,82 +82,47 @@ class find_multilingual_neurons():
                         row = f_cont[rid]
                         row_max = np.max(row)
                         row = row/row_max # Activation probability
-                        row = torch.tensor(row)
-                        # log_probs = torch.log2(row)
-                        log_probs = torch.where(row > 0, torch.log2(row), 0)
-                        ent = -torch.sum(row * log_probs)
-                        ent = ent.cpu().detach().numpy()
-                        ent = "{:.2e}".format(ent)
+                        epsilon = 1e-10  # Small constant to avoid division by zero
+                        row = row + epsilon
+                        log_probs = np.where(row > 0, np.log2(row), 0)
+                        ent = -np.sum(row*log_probs)
+                        # ent = "{:.2e}".format(ent)
                         entropy[lang_name][rid] = ent
                 entropy_df = pd.DataFrame(entropy)
                 entropy_df.to_csv(os.path.join(model_entropy_loc,models+"_"+cat+".csv"))
-                english_files = ["Enhi","Enfr","Encs","Ende"]
-                # # line_styles = ['-', '--', '-.', ':']  # Different line styles
-                # # markers = ['o', 'v', '^', '<', '>', 's', 'p', '*', 'h', 'H', '+', 'x', 'D', 'd', '|', '_']  # Different markers
-                colors = ['indianred','salmon','royalblue','forestgreen']
-                for c in english_files:
-                    c_name = c.replace('En','')
-                    if c_name=='de':
-                        color = colors[0]
-                    if c_name=='cs':
-                        color = colors[1]
-                    if c_name=='fr':    
-                        color = colors[2] 
-                    if c_name=='hi':
-                        color = colors[3]
-                    try:
-                        data = entropy_df[c]
-                        D = []
-                        for d in data.keys():
-                            D.append(float(data[d]))
-                        c_label = c[:2]+"("+c[2:]+")"
-                        plt.plot(D,linestyle='-', marker='o',color=color,label=c_label)
-                    except KeyError:
-                        print(f"Caught Key Error:\t{models}\t{cat}")
-                model_name = models.replace('.','-')
-                plt.gca().yaxis.set_ticks([]) 
-                plt.legend()
-                if cat=='detector_act':
-                    cat_title = "detector activations"
-                if cat=='combinator_act':
-                    cat_title = "combinator activations"
-                plt.title(f"Entropy of {cat_title} for {models}")
-                plt.ylabel('Entropy')
+
+    def plot_entropy(self):
+        model_entropy_loc = os.path.join(os.getcwd(),"model_entropy")
+        for files in os.listdir(model_entropy_loc):
+            if ".csv" in files:
+                fnames = files.replace(".csv","").split("_")
+                model_name = fnames[0].replace('.','-')
+                category = fnames[1]
+                file_df = pd.read_csv(os.path.join(model_entropy_loc,files),index_col=0)
+                langs = ["de","cs","fr","hi","Ende"]
+                colors = {"de":'indianred',"cs":'salmon',
+                          "fr":'royalblue',"hi":'forestgreen',
+                          "Ende":'orange'}
+                for i, col in enumerate(file_df.columns):
+                    if col in langs:
+                        c = colors[col]
+                        plottable = (1/file_df[col])
+                        plt.plot(plottable,linestyle='-', marker='o', label=col,color=c)
+                        # plt.errorbar(plottable.index, plottable, yerr=np.std(plottable), fmt='o', color=c)
                 plt.xlabel('Layer No.')
-                plt.tight_layout()
-                # plt.savefig(os.path.join(entropy_cat_loc,"english_"+model_name))
-                plt.savefig(os.path.join(entropy_cat_loc,"english_"+model_name+".pdf"))
-                plt.close()
-                plt.clf()
-                for c in entropy_df.columns:
-                    if c not in english_files:
-                        if c=='de':
-                            color = colors[0]
-                        if c=='cs':
-                            color = colors[1]
-                        if c=='fr':    
-                            color = colors[2] 
-                        if c=='hi':
-                            color = colors[3]
-                        data = entropy_df[c]
-                        D = []
-                        for d in data.keys():
-                            D.append(float(data[d]))
-                        plt.plot(D,linestyle='-', marker='o',color=color,label=c)
-                        # plt.plot(data,linestyle='-', marker='o',color=color,label=c)
-                plt.gca().yaxis.set_ticks([]) 
+                plt.ylabel(f'Extent of Activation({category})')                        
+                fol_loc = os.path.join(model_entropy_loc,category)
+                if not os.path.exists(fol_loc):
+                    os.mkdir(fol_loc)
+                if category=='detector':
+                    plot_name = f"d_all_{model_name}.pdf"
+                else:
+                    plot_name = f"c_all_{model_name}.pdf"
+                plt.title(model_name,fontsize=20)
                 plt.legend()
-                if cat=='detector_act':
-                    cat_title = "detector activations"
-                if cat=='combinator_act':
-                    cat_title = "combinator activations"
-                plt.title(f"Entropy of {cat_title} for {models}")
-                plt.ylabel('Entropy')
-                plt.xlabel('Layer')
-                # plt.savefig(os.path.join(entropy_cat_loc,"all_"+model_name))
-                plt.savefig(os.path.join(entropy_cat_loc,"all_"+model_name+".pdf"))
+                plt.savefig(os.path.join(fol_loc,plot_name))
                 plt.close()
-                plt.clf()
+                plt.clf()        
 
     def overlap(self,list1,list2):
         count = 0
@@ -267,5 +232,6 @@ class find_multilingual_neurons():
 find_neurons = find_multilingual_neurons()
 # find_neurons.find_eng_overlap()
 # find_neurons.check_entropy()
+find_neurons.plot_entropy()
 # find_neurons.create_dic()
-find_neurons.compare_english()
+# find_neurons.compare_english()

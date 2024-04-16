@@ -1,14 +1,17 @@
 **/__pycache__
-**/bleu_plots
-**/bleu_plots
+**/.cache
+**/.combinator_pics
 **/data
-**/multiling_comparison_plots
-**/multiling_detectors
-**/neuron_lists
-**/results
-**/results_english
-**/cluster_lists
-**/sorted_indices
+**/detector_pics
+**/entropy_data
+**/entropy_plots
+**/max_index
+**/model_layer_dist
+**/rank_data
+**/rank_plots
+**/snapshots
+**/sparsity_data
+**/sparsity_plots
 **/transformers_cache
 **/.history-bhattacharya
 **/*.log
@@ -17,5 +20,4 @@
 **/*.csv
 **/*.png
 **/*.pdf
-**/model_entropy/*.csv
 
