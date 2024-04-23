@@ -12,8 +12,11 @@ import sys
 import math
 import scipy.stats as ss
 from scipy import stats
+from scipy.stats import spearmanr, pearsonr
 import seaborn as sns
 # from torch.nn.functional import pairwise_distance
+import torch.nn.functional as F
+from sklearn.decomposition import KernelPCA
 
 class mechanistic():
 
@@ -522,7 +525,6 @@ class mechanistic():
                 end_loc = os.path.join(comb_loc,"Ende")
                 n_layers = len(os.listdir(end_loc))
                 lang_list = ["Ende","Encs","de","cs"]
-                # colors = {"Ende":"firebrick","Enfr":"cornflowerblue","de":"lightcoral","fr":"dodgerblue"}
                 colors = {
                         "de":   "forestgreen",
                         "cs":   "black",
@@ -534,7 +536,7 @@ class mechanistic():
                         "Encs": "cornflowerblue",
                     }
                 for lyr_id in range(n_layers):
-                    print(model,lyr_id)
+                    # print(model,lyr_id)
                     lyr_name = f"{lyr_id}.npy.gz"
                     file_name = os.path.join(model_pics, f'{lyr_id}.png')
                     plt.figure(figsize=(3, 3))  # Adjust the size as needed
@@ -542,19 +544,39 @@ class mechanistic():
                     for lid, lang in enumerate(lang_list):
                         lang_loc = os.path.join(comb_loc, lang)
                         lyr_loc = os.path.join(lang_loc, lyr_name)
-                        print(lyr_loc)
+                        # print(lyr_loc)
                         with gzip.open(lyr_loc, 'rb') as f:
                             data = np.load(f)
                             data = torch.tensor(data,dtype=torch.float32).cuda()
                             m = nn.GELU()
                             activation = m(data)
                             results = torch.stack([normalize(row) for row in activation])
-                            results = results.cpu().numpy()    
+                            """
+                            Why the weird peak for layer 0??
+                            """
+                            # if lyr_id==0:
+                            #     print(lang)
+                            #     max_ind = torch.argmax(results,dim=1)
+                            #     unq  = torch.unique(max_ind)
+                            #     print(unq)
+                            #     for item in unq:
+                            #         print(item)
+                            #     d = []
+                            #     for r_id in range(results.shape[1]):
+                            #         res = results[:,r_id]
+                            #         std = torch.std(res)
+                            #         # print(std)
+                            #         d.append(std)
+                            #     D = torch.tensor(d)
+                            #     k = torch.topk(D, 10)
+                            #     print(k.indices)
+                            #     print(lang,torch.unique(max_ind))
+
+                            results = results.cpu().numpy()
                             for i in tqdm(range(results.shape[1])):
                                 axs[int(lid/2),int(lid%2)].plot(np.repeat(i,len(results[:,i])),results[:, i],color=colors[lang])
                             ttl = f"{lang}"
                             axs[int(lid/2),lid%2].set_title(ttl,fontsize=15)
-                    print(file_name)    
                     plt.suptitle(f'{model}: {lyr_id}',fontsize=20)
                     plt.tight_layout()
                     plt.savefig(file_name)
@@ -613,34 +635,18 @@ class mechanistic():
                             activation = m(data)
                             results = torch.stack([normalize(row) for row in activation])
                             results = results.cpu().numpy()
-                            if lang=="cs":    
-                                # print(results)
-                                I = []
-                                for i in tqdm(range(results.shape[1])):
-                                    # print(np.max(results[:, i]),np.min(results[:, i]))
-                                    if np.max(results[:, i])>0.9:
-                                        I.append(i)
-                                        print(results[:, i])
-                                        print(np.repeat(i,len(results[:,i])))
-                                    plt.plot(np.repeat(i,len(results[:,i])),results[:, i],color=colors[lang])
-                                plt.savefig("Demo")
-                                print(I) 
-                        
-                                break
-                    break
-                    #         for i in tqdm(range(results.shape[1])):
-                    #             axs[int(lid/2),int(lid%2)].plot(np.repeat(i,len(results[:,i])),results[:, i],color=colors[lang])
-                    #         ttl = f"{lang}"
-                    #         axs[int(lid/2),lid%2].set_title(ttl,fontsize=10)
-                        # break
-                    # print(file_name)    
-                    # plt.suptitle(f'{model}: {lyr_id}',fontsize=10)
-                    # plt.tight_layout()
-                    # plt.savefig(file_name)
-                    # plt.close()
-                    # plt.clf()
+                            for i in tqdm(range(results.shape[1])):
+                                axs[int(lid/2),int(lid%2)].plot(np.repeat(i,len(results[:,i])),results[:, i],color=colors[lang])
+                            ttl = f"{lang}"
+                            axs[int(lid/2),lid%2].set_title(ttl,fontsize=10)    
+                    plt.suptitle(f'{model}: {lyr_id}',fontsize=10)
+                    plt.tight_layout()
+                    plt.savefig(file_name)
+                    plt.close()
+                    plt.clf()
 
     def tensor_dist(self):
+
         def normalize(data):
             min_data = torch.min(data)
             data = data - min_data
@@ -650,114 +656,222 @@ class mechanistic():
             modified_data = data/denominator
             modified_data = modified_data + 1e-32
             return modified_data
-        cosi = torch.nn.CosineSimilarity(dim=2)
+
+        dist_loc = os.path.join(os.getcwd(),"tensor_dist")
+        if not os.path.exists(dist_loc):
+            os.mkdir(dist_loc)
         for model in os.listdir(self.results):
             if model!="xglm-4.5B":
+            # if model=="xglm-7.5B":
                 model_loc = os.path.join(self.results, model)
+                dist_model = os.path.join(dist_loc,model)
+                if not os.path.exists(dist_model):
+                    os.mkdir(dist_model)
                 for cat in os.listdir(model_loc):
-                    # if cat=="combinators":
-                    if cat=="detectors":
-                        cat_loc  = os.path.join(model_loc,cat)
-                        end_loc = os.path.join(cat_loc,"Ende")
-                        n_layers = len(os.listdir(end_loc))
-                        lang_list = ["Ende","Enfr","de","fr"]
-                        colors = {"Ende":"firebrick","Enfr":"cornflowerblue","de":"lightcoral","fr":"dodgerblue"}
-                        distances = {}
-                        for lyr_id in tqdm(range(n_layers)):
-                            print(model,lyr_id)
-                            # if lyr_id==5:
-                            #     break
-                            lyr_name = f"{lyr_id}.npy.gz"
-                            tensors = []
-                            langs = []
-                            for lid, lang in enumerate(os.listdir(cat_loc)):
-                                lang_loc = os.path.join(cat_loc, lang)
-                                lyr_loc = os.path.join(lang_loc, lyr_name)
-                                with gzip.open(lyr_loc, 'rb') as f:
-                                    data = np.load(f)
-                                    data = torch.tensor(data,dtype=torch.float32).cuda()
-                                    m = nn.GELU()
-                                    activation = m(data)
-                                    results = torch.stack([normalize(row) for row in activation])
-                                    tensors.append(results)
-                                    # tensors.append(activation)
-                                    langs.append(lang)
-                            pairs = []
-                            for i in range(len(tensors)):
-                                for j in range(i+1, len(tensors)):
-                                    pair_name = f"{langs[i]}-{langs[j]}"
-                                    rev_name  = f"{langs[j]}-{langs[i]}"
-                                    if "En" in langs[i] and "En" in langs[j]:
-                                        break
-                                    if (pair_name not in pairs) and (rev_name not in pairs): 
-                                        pairs.append(pair_name)
-                                        tens1 = tensors[i]
-                                        tens2 = tensors[j]
-                                        min_samples = min(tens1.shape[0],tens2.shape[0])
-                                        index1 = torch.randint(low=0, high=min_samples, size=(1,min_samples))
-                                        index2 = torch.randint(low=0, high=min_samples, size=(1,min_samples))
-                                        tensor1 = tens1[index1][0]
-                                        tensor2 = tens2[index2][0]
-                                        dist = []
-                                        for t_ind in tensor1:
-                                            t1 = t_ind
-                                            t2 = tensor2
-                                            t1t = t1.view(t1.shape[0],1)
-                                            r = torch.matmul(t1t.t(),t2.t())
-                                            dist.append(torch.min(r))
-                                        D = torch.sum(torch.stack(dist)).cpu().item()
-                                        if not pair_name in distances.keys():
-                                            distances[pair_name] = {}
-                                        if not lyr_id in distances[pair_name].keys():
-                                            distances[pair_name][lyr_id] = []   
-                                        # distances[pair_name][lyr_id]=dist.tolist()
-                                        distances[pair_name][lyr_id]=D
-                        for lp in distances.keys():
-                            lang_pair = distances[lp]
-                            plot_data = []
-                            for lyr in lang_pair.keys():
-                                lyr_info = lang_pair[lyr]
-                                plot_data.append(lyr_info)
-                            lang1 = lp.split("-")[0]
-                            lang2 = lp.split("-")[1]
-                            if lang1=="de":
-                                color = "black"
-                            elif lang1=="fr":
-                                color = "royalblue"
-                            elif lang1=="hi":
-                                color = "brown"
-                            elif lang1=="cs":
-                                color = "teal"
-                            if "En" in lang1:
-                                color = "springgreen"
-                            if lang2=="de":
-                                marker = "."
-                            elif lang2=="fr":
-                                marker = "v"
-                            elif lang2=="hi":
-                                marker = "^"
-                            elif lang2=="cs":
-                                marker = "4"
-                            elif "En" in lang2:
-                                marker = "+"
-                            x = []
-                            for i in range(len(plot_data)):
-                                x.append(i+1)
-                            plt.plot(x,plot_data,label=lp,color=color,marker=marker)
-                        plt.legend(loc='center left',  fontsize="4", bbox_to_anchor=(1, 0.5), ncol=3, fancybox=True)
-                        plt.xlabel("Layers")
-                        plt.ylabel("Distance")
-                        plt.title(f"Representational sim: {model}-->{cat}")
+                    cat_loc  = os.path.join(model_loc,cat)
+                    end_loc = os.path.join(cat_loc,"Ende")
+                    n_layers = len(os.listdir(end_loc))
+                    lang_list = ["Ende","Enfr","de","fr"]
+                    colors = {"Ende":"firebrick","Enfr":"cornflowerblue","de":"lightcoral","fr":"dodgerblue"}
+                    distances = {}
+                    for lyr_id in tqdm(range(n_layers)):
+                        lyr_name = f"{lyr_id}.npy.gz"
+                        tensors = []
+                        langs = []
+                        for lid, lang in enumerate(os.listdir(cat_loc)):
+                            lang_loc = os.path.join(cat_loc, lang)
+                            lyr_loc = os.path.join(lang_loc, lyr_name)
+                            with gzip.open(lyr_loc, 'rb') as f:
+                                data = np.load(f)
+                                data = torch.tensor(data,dtype=torch.float32).cuda()
+                                m = nn.GELU()
+                                activation = m(data)
+                                results = torch.stack([normalize(row) for row in activation])
+                                tensors.append(results)
+                                # tensors.append(activation)
+                                langs.append(lang)
+                        pairs = []
+                        for i in range(len(tensors)):
+                            for j in range(i+1, len(tensors)):
+                                pair_name = f"{langs[i]}-{langs[j]}"
+                                rev_name  = f"{langs[j]}-{langs[i]}"
+                                if "En" in langs[i] and "En" in langs[j]:
+                                    continue
+                                if (pair_name not in pairs) and (rev_name not in pairs): 
+                                    pairs.append(pair_name)
+                                    tens1 = tensors[i]
+                                    tens2 = tensors[j]
+                                    index1 = torch.randint(low=0, high=tens1.size(0), size=(tens1.size(0),))
+                                    index2 = torch.randint(low=0, high=tens2.size(0), size=(tens2.size(0),))
+                                    tensor1 = tens1[index1]
+                                    tensor2 = tens2[index2]
+                                    distances_batch = []
+                                    for start_idx in range(0,tensor1.size(0),1000):
+                                        end_idx = start_idx+1000
+                                        if end_idx>tensor1.size(0):
+                                            end_idx = tensor1.size(0)
+                                        dist = torch.cdist(tensor1[start_idx:end_idx],tensor2)
+                                        min_dist = (torch.min(dist,dim=-1)).values.cpu().numpy().tolist()
+                                        distances_batch = distances_batch + min_dist    
+                                    D = np.sum(distances_batch)
+                                    if not pair_name in distances.keys():
+                                        distances[pair_name] = {}
+                                    if not lyr_id in distances[pair_name].keys():
+                                        distances[pair_name][lyr_id] = []   
+                                    distances[pair_name][lyr_id].append(D)
+                    dist_cat = os.path.join(dist_model,f"{cat}.json")
+                    with open(dist_cat, "w") as outfile: 
+                        json.dump(distances, outfile)
+                        
+    def plot_tensor_dist(self):
+        colors = {
+                        "de":   "forestgreen",
+                        "cs":   "black",
+                        "hi":   "brown",
+                        "fr":   "orange",
+                        "Ende": "navy",
+                        "Enfr": "darkblue",
+                        "Enhi": "slateblue",
+                        "Encs": "cornflowerblue",
+                    }
+        markers = {
+                        "de":   ".",
+                        "cs":   "o",
+                        "hi":   "v",
+                        "fr":   "^",
+                        "Ende": "3",
+                        "Enfr": "*",
+                        "Enhi": "h",
+                        "Encs": "+", 
+
+                    }
+        
+        dist_loc = os.path.join(os.getcwd(),"tensor_dist")
+        dist_plots = os.path.join(os.getcwd(),"tensor_plots")
+        if not os.path.exists(dist_plots):
+            os.mkdir(dist_plots)
+        for model in os.listdir(dist_loc):
+            model_name = model.replace(".","_")
+            model_loc = os.path.join(dist_loc,model)
+            for files in os.listdir(model_loc):
+                fname = files.replace(".json","")
+                data_loc = os.path.join(model_loc,files)
+                # Opening JSON file
+                f = open(data_loc)
+                data = json.load(f)
+                for lp in sorted(data.keys()):
+                    lang_pair = data[lp]
+                    l1 = lp.split("-")[0]
+                    l2 = lp.split("-")[1]
+                    item = lp
+                    plot = True
+                    if "En" in l1:
+                        temp = l1
+                        l1 = l2
+                        l2 = temp
+                        item = f"{l1}-{l2}" 
+                    if ("En" not in l1) and ("En" in l2):
+                        if l2.replace("En","")==l1:
+                            plot = True
+                        else:
+                            plot = False
+                    if ("En" in l1) and ("En" in l2):
+                        plot = True
+                    if plot:
+                        vals = []
+                        for layer in lang_pair.keys():
+                            vals.append(np.mean(lang_pair[layer][0]))
+                        plt.plot(np.arange(0,len(lang_pair.keys())),vals,label=item,color=colors[l1],marker=markers[l2])
+                plt.title(f"{model}",fontsize=12)
+                plt.xlabel("Layers")
+                plt.ylabel("Distance")
+                # plt.legend()
+                plt.legend(loc='center left', bbox_to_anchor=(1, 0.5),ncol=2,fontsize=8)
+                f_name = f"{model_name}_{fname}.pdf"
+                f_loc = os.path.join(dist_plots,f_name)
+                plt.tight_layout()
+                plt.savefig(f_loc) 
+                plt.close()
+                plt.clf()
+                
+    def rep_similarity(self):
+
+        def normalize(data):
+            min_data = torch.min(data)
+            data = data - min_data
+            if torch.min(data)<0:
+                print("Negative values in data")
+            denominator = torch.max(data)-min_data
+            modified_data = data/denominator
+            modified_data = modified_data + 1e-32
+            return modified_data
+
+        cats = ["combinators","detectors"]
+        lang = "de"
+        models = ["xglm-1.7B","xglm-2.9B","xglm-7.5B"]
+        cos = nn.CosineSimilarity(dim=1, eps=1e-6)
+        for cat in cats:
+            for mid in range(len(models)-1):
+                for mid2 in range(mid+1,len(models)):
+                    model1 = models[mid]
+                    model2 = models[mid2]
+                    model1_loc = os.path.join(self.results, f"{model1}/{cat}/{lang}")
+                    model2_loc = os.path.join(self.results, f"{model2}/{cat}/{lang}")
+                    Distances = []
+                    n_lyr1 = len(os.listdir(model1_loc))
+                    n_lyr2 = len(os.listdir(model2_loc))
+                    Dist = []
+                    m1 = model1.replace(".","-")
+                    m2 = model2.replace(".","-")
+                    pic_name = f"{m1}_{m2}_{cat}_{lang}"
+                    for lyr1 in range(n_lyr1):
+                        model1_lyr  = os.path.join(model1_loc,f"{lyr1}.npy.gz")
+                        dist = []
+                        for lyr2 in tqdm(range(n_lyr2)):
+                            model2_lyr  = os.path.join(model2_loc,f"{lyr2}.npy.gz")    
+                            with gzip.open(model1_lyr, 'rb') as f:
+                                data = np.load(f)
+                                data_1 = torch.tensor(data,dtype=torch.float32)
+                                if torch.cuda.is_available():
+                                    data_1 = torch.tensor(data,dtype=torch.float32).cuda()
+                                m = nn.GELU()
+                                activation = m(data_1)
+                                results_1 = torch.stack([normalize(row) for row in activation])
+                                
+                            with gzip.open(model2_lyr, 'rb') as f:
+                                data = np.load(f)
+                                data_2 = torch.tensor(data,dtype=torch.float32)
+                                if torch.cuda.is_available():
+                                    data_2 = torch.tensor(data,dtype=torch.float32).cuda()
+                                m = nn.GELU()
+                                activation = m(data_2)
+                                results_2 = torch.stack([normalize(row) for row in activation])
+                            v1 = results_1 
+                            v2 = results_2
+                            batch_size = 5000
+                            num_samples = v1.shape[0]
+                            num_batches = (num_samples + batch_size - 1) // batch_size 
+                            similarities = []
+                            for i in range(num_batches):
+                                start_idx = i * batch_size
+                                end_idx = min((i + 1) * batch_size, num_samples)
+                                batch_rep_1 = v1[start_idx:end_idx,:]
+                                batch_rep_2 = v2[start_idx:end_idx,:]
+                                rsm1 = torch.corrcoef(batch_rep_1)
+                                rsm2 = torch.corrcoef(batch_rep_2)
+                                corr, _ = pearsonr(rsm1.cpu().numpy().flatten(), rsm2.cpu().numpy().flatten())
+                                similarities.append(corr)
+                            S = sum(similarities)/len(similarities)
+                            dist.append(S)
+                        Dist.append(dist)
+                        print(Dist)
+                        print("\n")
+                        sns.heatmap(Dist, fmt="d", cmap="viridis")  # annot=True for annotations, fmt="d" for integer format
                         plt.tight_layout()
-                        f_name = f"{model}_{cat}_distances.png"
-                        f_loc  = os.path.join(os.getcwd(),"model_layer_dist")
-                        if not os.path.exists(f_loc):
-                            os.mkdir(f_loc)
-                        sv_loc = os.path.join(f_loc,f_name)
-                        plt.savefig(sv_loc)
+                        plt.savefig(pic_name)
                         plt.close()
                         plt.clf()
-   
+
 if __name__ == "__main__":
     m = mechanistic()
     # m.extract_sparsity()
@@ -767,6 +881,7 @@ if __name__ == "__main__":
     # m.extract_neurons()
     # m.rank_corr()
     # m.investigate_flatness_comb()
-    m.investigate_flatness_det()
+    # m.investigate_flatness_det()
     # m.tensor_dist()
-    
+    # m.plot_tensor_dist()
+    m.rep_similarity()

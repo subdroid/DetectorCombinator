@@ -23,4 +23,4 @@
 
 # sbatch --job-name p1 --output p1.out --error p1.err -p gpu-ms,gpu-troja --mem=64G run_interpretability.sh
 # sbatch --job-name p2 --output p2.out --error p2.err -p gpu-ms,gpu-troja --mem=100G run_interpretability.sh
-sbatch --job-name p3 --output p3.out --error p3.err -p gpu-ms,gpu-troja --mem=100G run_interpretability.sh
+sbatch --job-name p3 --output p3.out --error p3.err -p gpu-ms,gpu-troja --mem=64G run_interpretability.sh
