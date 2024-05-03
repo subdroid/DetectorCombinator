@@ -1,23 +1,12 @@
-**/__pycache__
-**/.cache
-**/.combinator_pics
-**/data
-**/detector_pics
-**/entropy_data
-**/entropy_plots
-**/max_index
-**/model_layer_dist
-**/rank_data
-**/rank_plots
-**/snapshots
-**/sparstity_data
-**/sparsity_plots
-**/transformers_cache
-**/.history-bhattacharya
-**/*.log
-**/*.out
-**/*.err
-**/*.csv
-**/*.png
-**/*.pdf
+# Ignore everything
+*
 
+# Except Python files
+!*.py
+
+# Except Shell scripts
+!*.sh
+
+# Except LICENSE and README files
+!LICENSE
+!README*
