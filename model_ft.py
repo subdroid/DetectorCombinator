@@ -19,10 +19,61 @@ from transformers import Trainer, TrainingArguments
 import matplotlib.pyplot as plt
 import pandas as pd
 import random
+from sklearn.cluster import KMeans
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 torch.set_float32_matmul_precision('medium')  
 
+class CustomTrainer(Trainer):
+    def __init__(self, *args, t_layer=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.t_layer = t_layer
+    """
+    Reusing the loss computation to include multilingual contrastive loss
+    """
+    def compute_loss(self, model, inputs, return_outputs=False):
+        if self.label_smoother is not None and "labels" in inputs:
+            labels = inputs.pop("labels")
+        else:
+            labels = None
+        outputs = model(**inputs)
+        hidden_states = outputs['hidden_states']
+        target_embeddings = hidden_states[self.t_layer]
+        batch_size = target_embeddings.size(0)
+        embeddings_norm = F.normalize(target_embeddings, p=2, dim=-1)  # Normalize embeddings 
+        embeddings_flat = embeddings_norm.view(embeddings_norm.size(0), -1)
+
+        # Apply K-means clustering with 2 clusters
+        kmeans = KMeans(n_clusters=2, random_state=0)
+        cluster_labels = kmeans.fit_predict(embeddings_flat.cpu().numpy())
+
+        # Convert cluster labels to PyTorch tensor
+        cluster_labels_tensor = torch.tensor(cluster_labels)
+        c1, c2 = [], []
+        for lid, lbl in enumerate(cluster_labels_tensor):
+            if lbl==0:
+                c1.append(embeddings_norm[lid])
+            else:
+                c2.append(embeddings_norm[lid])
+        C1 = torch.stack(c1)
+        C2 = torch.stack(c2)
+
+        c1_centroid = torch.mean(C1,dim=0)
+        c2_centroid = torch.mean(C2,dim=0)
+        
+        dists = torch.cdist(c1_centroid, c2_centroid)
+        loss_contrastive = 1/torch.mean(dists)
+        # print(loss_contrastive)
+
+        if self.args.past_index >= 0:
+            self._past = outputs[self.args.past_index]
+
+        loss = outputs["loss"]+loss_contrastive if isinstance(outputs, dict) else outputs[0]
+        
+        return (loss, outputs) if return_outputs else loss
 
 # Define your custom dataset class
 class EvalDataset(Dataset):
@@ -64,6 +115,13 @@ class TrainLossCallback(TrainerCallback):
         self.f_name = f"train_loss_{self.t_layer}.csv"  
         self.f_loc = os.path.join(self.save_loc,self.f_name) 
         fl_loss.to_csv(self.f_loc,index=False)
+
+        fl_loss = pd.DataFrame(columns=["loss"])
+        self.f_name2 = "train_loss.csv"  
+        self.f_loc2 = os.path.join(self.save_loc,self.f_name2)
+        if not os.path.exists(self.f_loc2):
+            fl_loss.to_csv(self.f_loc2,index=False)
+        # fl_loss.to_csv(self.f_loc2,index=False)
         
     def on_step_end(self, args, state, control, **kwargs):
         step = state.global_step
@@ -83,6 +141,25 @@ class TrainLossCallback(TrainerCallback):
             plt.xlabel("Step")
             plt.ylabel("Loss")
             f_name = f"train_loss_{self.t_layer}.png"     
+            f_loc  = os.path.join(self.pic_loc,f_name) 
+            plt.savefig(f_loc)
+            plt.close()
+            plt.clf()
+            
+            fl = pd.read_csv(self.f_loc2)
+            df_temp = pd.DataFrame.from_dict({"loss":[loss]})
+            if not fl.empty:
+                fl = pd.concat([fl,df_temp],ignore_index=True)
+            else:
+                fl = df_temp
+            fl.to_csv(self.f_loc2,index=False)
+            # fl.to_csv("train_loss.csv",index=False)
+            X = np.arange(0,len(fl["loss"].tolist()))
+            plt.plot(X,fl["loss"].tolist())
+            plt.title("2.9B: Train Loss")
+            plt.xlabel("Step")
+            plt.ylabel("Loss")
+            f_name = f"train_loss_total_history.png"     
             f_loc  = os.path.join(self.pic_loc,f_name) 
             plt.savefig(f_loc)
             plt.close()
@@ -120,12 +197,15 @@ class EvalLossCallback(TrainerCallback):
         self.ev_name = f"eval_loss_{self.tlayer}.csv"  
         self.ev_loc = os.path.join(self.sv_eval_loc,self.ev_name) 
         fl_loss.to_csv(self.ev_loc,index=False)
-        self.ev_loc2 = os.path.join(self.sv_eval_loc,f"eval_loss_history.csv") 
-        fl_loss.to_csv(self.ev_loc,index=False)
-        fl_loss.to_csv(self.ev_loc2,index=False)
-        
-        # fl_loss.to_csv("eval_loss.csv",index=False)
 
+        fl_loss = pd.DataFrame(columns=["loss"])
+        self.ev_loc2 = os.path.join(self.sv_eval_loc,f"eval_loss_history.csv") 
+        if not os.path.exists(self.ev_loc2):
+            fl_loss.to_csv(self.ev_loc2,index=False)
+
+        # fl_loss.to_csv("eval_loss.csv",index=False)
+        fl_loss = pd.DataFrame(columns=["step","loss"])
+        
         sv_en_loc = "en_csv"
         if not os.path.exists(sv_en_loc):
             os.makedirs(sv_en_loc)
@@ -212,15 +292,15 @@ class EvalLossCallback(TrainerCallback):
             plt.clf()
             
             fl = pd.read_csv(self.ev_loc2)
-            df_temp = pd.DataFrame.from_dict({"step":[int(step)],"loss":[total_loss]})
+            df_temp = pd.DataFrame.from_dict({"loss":[total_loss]})
             if not fl.empty:
                 fl = pd.concat([fl,df_temp],ignore_index=True)
             else:
                 fl = df_temp
             fl.to_csv(self.ev_loc2,index=False)
             # fl.to_csv("eval_loss.csv",index=False)
-
-            plt.plot(fl["step"].tolist(),fl["loss"].tolist())
+            X = np.arange(0,len(fl["loss"].tolist()))
+            plt.plot(X,fl["loss"].tolist())
             plt.title("2.9B: Eval Loss")
             plt.xlabel("Step")
             plt.ylabel("Loss")
@@ -300,11 +380,12 @@ class PMDataset(Dataset):
 
 class model_load():    
     def __init__(self, model_name, mode, t_layer):
-        
+        print("ok")
         self.model_name = model_name
         self.tokenizer  = AutoTokenizer.from_pretrained(model_name,cache_dir=".cache")
         self.dataset    = PMDataset("/home/bhattacharya/personal_work_troja/Detector_exp", self.tokenizer)
-        
+
+        # print("ok")
         self.mode    = mode
         self.t_layer = t_layer
 
@@ -318,41 +399,47 @@ class model_load():
         model_exists = len(os.listdir(self.saved_model_loc))>0
         try:
             if not model_exists:
-                self.model = AutoModelForCausalLM.from_pretrained(model_name,cache_dir=".cache")
+                self.model = AutoModelForCausalLM.from_pretrained(model_name,cache_dir=".cache", output_hidden_states=True)
             else:
-                self.model = AutoModelForCausalLM.from_pretrained(os.path.join(self.saved_model_loc,"best_model"))
+                self.model = AutoModelForCausalLM.from_pretrained(os.path.join(self.saved_model_loc,"best_model"), output_hidden_states=True)
         except ImportError:
             if not model_exists:
-                self.model = XGLMForCausalLM.from_pretrained(model_name,cache_dir=".cache")                                         
+                self.model = XGLMForCausalLM.from_pretrained(model_name,cache_dir=".cache", output_hidden_states=True)                                         
             else:
-                self.model = XGLMForCausalLM.from_pretrained(os.path.join(self.saved_model_loc,"best_model"))  
-       
-        # Freeze all all layers
-        for param in self.model.parameters():
-            param.requires_grad = False
+                self.model = XGLMForCausalLM.from_pretrained(os.path.join(self.saved_model_loc,"best_model"), output_hidden_states=True)  
 
-        # Unfreeze selected layers (LIFT)
+        print(self.model)
+
         for name, param in self.model.named_parameters():
-            if name.split(".")[0]=="model":
-                if len(name.split("."))==5:
-                    lyr_name = name.split(".")[2]
-                    if int(lyr_name) == self.t_layer:
-                        param.requires_grad = True
-            elif name.split(".")[0]=="layers":
-                if len(name.split("."))==4:
-                    lyr_name = name.split(".")[1]
-                    if int(lyr_name) == self.t_layer:
-                        param.requires_grad = True
-        if torch.cuda.is_available():
-            self.model = self.model.cuda()
+            print(name)
+        # MoE_model = _moe_convert(16,self.model,self.tokenizer)
 
-        # Define optimizer hyperparameters
-        self.optimizer_kwargs = {
-            "lr": 7.5e-4,
-            "eps": 1e-8,
-            # "weight_decay": 0.01,
-            "betas": (0.9, 0.98)
-        }
+        # # Freeze all all layers
+        # for param in self.model.parameters():
+        #     param.requires_grad = False
+
+        # # Unfreeze selected layers (LIFT)
+        # for name, param in self.model.named_parameters():
+        #     if name.split(".")[0]=="model":
+        #         if len(name.split("."))==5:
+        #             lyr_name = name.split(".")[2]
+        #             if int(lyr_name) == self.t_layer:
+        #                 param.requires_grad = True
+        #     elif name.split(".")[0]=="layers":
+        #         if len(name.split("."))==4:
+        #             lyr_name = name.split(".")[1]
+        #             if int(lyr_name) == self.t_layer:
+        #                 param.requires_grad = True
+        # if torch.cuda.is_available():
+        #     self.model = self.model.cuda()
+
+        # # Define optimizer hyperparameters
+        # self.optimizer_kwargs = {
+        #     "lr": 7.5e-4,
+        #     "eps": 1e-8,
+        #     # "weight_decay": 0.01,
+        #     "betas": (0.9, 0.98)
+        # }
 
     def _get_training_arguments(self, **kwargs):
         default_training_args = {
@@ -362,9 +449,12 @@ class model_load():
             "overwrite_output_dir": True,
             "num_train_epochs": 5,
             "per_device_train_batch_size": 8,
+            "learning_rate": 6e-5,
             # "learning_rate": 5e-5,
-            "learning_rate": 5e-4,
+            # "learning_rate": 5e-4,
             "gradient_accumulation_steps": 2,
+            "auto_find_batch_size": True,
+            "include_tokens_per_second": True,
             **kwargs
         }
         return TrainingArguments(**default_training_args)    
@@ -400,55 +490,100 @@ class model_load():
         print_loss_callback = TrainLossCallback(log_frequency=10, tlayer=self.t_layer, tmode = self.mode)
         eval_loss_callback  = EvalLossCallback(tokenizer=self.tokenizer, model=self.model, eval_frequency=200, tlayer=self.t_layer, tmode = self.mode)
 
-        trainer = Trainer(
+        # trainer = Trainer(
+        #     model=self.model,
+        #     args=self._get_training_arguments(),
+        #     data_collator=self.custom_collate,
+        #     train_dataset=train_dataset,
+        #     optimizers=optimizers,
+        #     callbacks=[print_loss_callback,eval_loss_callback],
+        # )
+
+        trainer = CustomTrainer(
             model=self.model,
             args=self._get_training_arguments(),
             data_collator=self.custom_collate,
             train_dataset=train_dataset,
             optimizers=optimizers,
             callbacks=[print_loss_callback,eval_loss_callback],
+            t_layer = self.t_layer,
         )
+        
     
         trainer.train()
-
+        
         del self.model
 
+class Expert(nn.Module):
+    def __init__(self,ffn_dim=None,n_experts=None,d_model=None):
+        super(Expert,self).__init__()
+        self.L1 = nn.Linear(ffn_dim,n_experts)
+        self.activation = nn.ReLU()
+        self.L2 = nn.Linear(n_experts,d_model)
+    def forward(input_rep):
+        return self.L2(self.activation(self.L1(input_rep))) 
 
 
-D=[]
-loop = True
-for i in range(26):
-    while loop:
-        r = random.randint(20,46)
-        if r not in D:
-            D.append(r)
-            loop = False
-    loop = True
-    model = model_load("facebook/xglm-2.9B","random",r)
-    model.fine_tune()
-    torch.cuda.empty_cache()
+def _moe_convert(num_experts,mother_model,tokenizer):
+    num_layers = mother_model.config.num_layers
+    for name, params in mother_model.named_parameters():
+        print(name)
+    
 
-# D = []        
-for i in range(1,27):
-    beg = 19
-    end = beg+i
-    # D.append([beg,end])
-    model = model_load("facebook/xglm-2.9B","ascending",end)
-    model.fine_tune("ascending")
-    torch.cuda.empty_cache()
-# print(D)
-
-# D = []
-for i in range(26,0,-1):
-    end = 19
-    beg = end+i
-    # D.append([beg,end])
-    # print(beg,end)
-    model = model_load("facebook/xglm-2.9B","descending",end)
-    model.fine_tune()
-    torch.cuda.empty_cache()
-# print(D)
-
-# print(len(D))
+# class MoEModel(nn.Module):
+#     def __init__(self,num_experts,mother_model,tokenizer):
+#         super(MoEModel,self).__init__()
+#         self.num_experts = num_experts
+#         self.base_model = mother_model
+#         self.num_layers = self.base_model.config.num_layers
+#         self.expert_layer = Expert(self.base_model.config.ffn_dim,num_experts,self.base_model.config.d_model)
+#         self.expert_ff_layers = nn.ModuleList([self.expert_layer for _ in range(self.num_layers)])
+        
+#     def forward(self):
+#         for name, params in self.base_model.named_parameters():
+#             print(name)
 
 
+
+    # def _get_expert_ffn_layers(self):
+    #     for i in range(self.num_hidden_layers):
+    #         layer = nn.Sequential(
+    #             nn.Linear(self.base_model.config.hidden_size, self.base_model.config.hidden_size),
+    #             nn.ReLU(),
+    #             nn.LayerNorm(self.base_model.config.hidden_size)
+    #         )
+    #         expert_ff_layers.append(layer)
+    #     return expert_ff_layers
+
+
+model = model_load("facebook/xglm-564M","ascending",20)
+
+# for i in range(1,27):
+#     beg = 19
+#     end = beg+i
+#     model = model_load("facebook/xglm-2.9B","ascending",end)
+#     model.fine_tune()
+#     torch.cuda.empty_cache()
+#     # break
+
+# for i in range(26,0,-1):
+#     end = 19
+#     beg = end+i
+#     model = model_load("facebook/xglm-2.9B","descending",beg)
+#     model.fine_tune()
+#     torch.cuda.empty_cache()
+
+# D=[]
+# loop = True
+# for i in range(26):
+#     while loop:
+#         r = random.randint(20,45)
+#         if r not in D:
+#             D.append(r)
+#             loop = False
+#     loop = True
+#     model = model_load("facebook/xglm-2.9B","random",r)
+#     model.fine_tune ()
+#     torch.cuda.empty_cache()
+
+# # print(sorted(D),len(D))
